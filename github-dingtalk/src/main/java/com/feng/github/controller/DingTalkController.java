@@ -6,4 +6,7 @@ package com.feng.github.controller;
  * @date: 2018/2/10
  */
 public class DingTalkController {
+    public static void main(String[] args) {
+
+    }
 }
