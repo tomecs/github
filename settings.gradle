@@ -1,2 +1,6 @@
+include 'devLocal'
+include 'devLocal2'
+
+
 rootProject.name = 'github-all'
 include 'brente'
