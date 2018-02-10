@@ -1,33 +1,209 @@
+/** ******************************************************************************************/
+/** ******************************************************************************************/
+
+ext {
+	vortexCloudGroup = "com.vortex"
+	vortexCloudVersion = "2.0.0-SNAPSHOT"
+	//统一定义依赖组件版本号
+	guavaVersion = "19.0"
+	jacksonVersion = "2.7.4"
+	mysqlConnectorVersion = "6.0.2"
+	logbackVersion = "1.1.7"
+	activitiVersion = "5.22.0"
+	poiVersion = "3.15"
+}
+
+/** ******************************************************************************************/
+/** ******************************************************************************************/
+
+/**
+ * 编译脚本
+ */
 buildscript {
+
+	Properties localProperties = new Properties()
+
 	ext {
-		springBootVersion = '1.5.10.RELEASE'
+		springVersion = "4.2.6.RELEASE"
+		springBootVersion = "1.5.2.RELEASE"
+		//spring 镜像repo
+		springRepo = "http://maven.springframework.org/release/org/springframework/"
+		//阿里云maven镜像
+		aliyunRepo = "http://maven.aliyun.com/nexus/content/groups/public/"
 	}
+
 	repositories {
+		mavenLocal()
 		mavenCentral()
+		maven { url "${aliyunRepo}" }
+		maven { url "${springRepo}" }
 	}
+
 	dependencies {
 		classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+		classpath 'com.bmuschko:gradle-docker-plugin:2.6.7'
+		classpath("io.spring.gradle:dependency-management-plugin:0.6.1.RELEASE")
+		classpath("org.springframework:springloaded:1.2.5.RELEASE")
 	}
 }
 
-apply plugin: 'java'
-apply plugin: 'eclipse'
-apply plugin: 'org.springframework.boot'
+/** ******************************************************************************************/
+/** ******************************************************************************************/
 
-group = 'com.github'
-version = '0.0.1-SNAPSHOT'
-sourceCompatibility = 1.8
+/**
+ * 根项目
+ */
+allprojects {
+	//公共插件
+	apply plugin: "idea"
+	apply plugin: "maven"
 
-repositories {
-	mavenCentral()
+	group "com.feng"
+	version "1.0.0-SNAPSHOT"
+
+	repositories {
+		mavenLocal()
+		maven { url "${aliyunRepo}" }
+		maven { url "${springRepo}" }
+		mavenCentral()
+	}
+
+	idea {
+		module {
+			inheritOutputDirs = false
+			outputDir = file("$buildDir/classes/main/")
+		}
+	}
 }
 
+/** ******************************************************************************************/
+/** ******************************************************************************************/
 
-dependencies {
-	compile('org.springframework.boot:spring-boot-starter-data-jpa')
-	compile('org.springframework.boot:spring-boot-starter-thymeleaf')
-	compile('org.springframework.boot:spring-boot-starter-web')
-	runtime('mysql:mysql-connector-java')
-	compileOnly('org.projectlombok:lombok')
-	testCompile('org.springframework.boot:spring-boot-starter-test')
+/**
+ * 所有叶子节点模块都是java模块
+ */
+configure(isJavaProject()) {
+	apply plugin: "java"
+
+	//JVM 版本号要求
+	sourceCompatibility = 1.8
+	targetCompatibility = 1.8
+
+	//java编译的时候缺省状态下会因为中文字符而失败
+	[compileJava, compileTestJava, javadoc]*.options*.encoding = "UTF-8"
+
+	dependencies {
+		compile fileTree(dir: "libs", include: ["*.jar"])
+		compile "${vortexCloudGroup}:base-lib:${vortexCloudVersion}"
+		compile "${vortexCloudGroup}:util-jpa:${vortexCloudVersion}"
+		//logstash for logback
+		compile("net.logstash.logback:logstash-logback-encoder:4.11")
+		compile("org.springframework.boot:spring-boot-devtools:1.5.7.RELEASE")
+	}
+
+	//打包源代码
+	task sourcesJar(type: Jar, dependsOn: classes) {
+		classifier = "sources"
+		from sourceSets.main.allSource
+	}
+
+	artifacts {
+		archives sourcesJar
+	}
+
+	// 所有需要忽略的包定义在此
+	configurations {
+		all*.exclude group: "org.slf4j", module: "slf4j-log4j12"
+		all*.exclude group: "commons-logging"
+	}
+
+}
+
+/** ******************************************************************************************/
+/** ******************************************************************************************/
+/**
+ * docker-micro-service模块
+ */
+import com.bmuschko.gradle.docker.tasks.container.DockerCreateContainer
+import com.bmuschko.gradle.docker.tasks.container.DockerStartContainer
+import com.bmuschko.gradle.docker.tasks.container.DockerStopContainer
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+
+configure(isDockerProject()) {
+
+	apply plugin: 'com.bmuschko.docker-remote-api'
+
+	ext {
+		dockerFilePath = "src/main/docker"
+		dockerBuildPath = "build/docker"
+	}
+
+	docker {
+		if (System.env.DOCKER_HOST) {
+			url = "$System.env.DOCKER_HOST".replace("tcp", "https")
+			if (System.env.DOCKER_CERT_PATH) {
+				certPath = new File(System.env.DOCKER_CERT_PATH)
+			}
+		} else {
+			url = 'unix:///var/run/docker.sock'
+		}
+//    registryCredentials {
+//        url = 'https://index.docker.io/v1'
+//        username = 'bmuschko'
+//        password = 'pwd'
+//        email = ''
+//    }
+	}
+
+	task copyJar(type: Copy) {
+		dependsOn build
+
+		from "build/libs/${project.name}-${project.version}.jar"
+		into "${dockerBuildPath}"
+
+		from "${dockerFilePath}"
+		into "${dockerBuildPath}"
+	}
+
+	task buildImage(type: DockerBuildImage) {
+		dependsOn copyJar
+		inputDir = file("${dockerBuildPath}")
+		tag = "${rootProject.name}/${project.name}"
+	}
+
+	task createContainer(type: DockerCreateContainer) {
+		dependsOn buildImage
+		targetImageId { buildImage.getImageId() }
+//        portBindings = ['8888:8888']
+//        portBindings = ['${core.port}:${core.port}']
+	}
+
+	task startContainer(type: DockerStartContainer) {
+		dependsOn createContainer
+		targetContainerId { createContainer.getContainerId() }
+	}
+
+	task stopContainer(type: DockerStopContainer) {
+		targetContainerId { createContainer.getContainerId() }
+	}
+
+	task testContainer(type: Test) {
+		dependsOn startContainer
+		finalizedBy stopContainer
+	}
+}
+
+/** ******************************************************************************************/
+/** ******************************************************************************************/
+
+def isDockerProject() {
+	return subprojects.findAll {
+		new File(it.projectDir, "src/main/docker").exists()
+	}
+}
+
+def isJavaProject() {
+	return subprojects.findAll {
+		it.childProjects.size() == 0 && new File(it.projectDir, "src").exists() && it.name.indexOf("web") < 0
+	}
 }

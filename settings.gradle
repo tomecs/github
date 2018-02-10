@@ -1,6 +1,5 @@
-include 'devLocal'
-include 'devLocal2'
-
-
 rootProject.name = 'github-all'
-include 'brente'
+include 'github'
+include 'github-common'
+include 'github-app'
+include 'github-source-generator'
