@@ -1,0 +1,12 @@
+spring.profiles.active: local
+
+server:
+  port: 12181
+
+spring.jpa:
+    show-sql: true
+    database: MYSQL
+    properties.hibernate.dialect: org.hibernate.dialect.MySQL5Dialect
+    hibernate:
+      ddl-auto: update
+      naming-strategy: org.hibernate.cfg.ImprovedNamingStrategy
